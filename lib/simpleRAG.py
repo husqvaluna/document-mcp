@@ -8,7 +8,7 @@ import sqlite_vec
 
 # EMBEDDING_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
 EMBEDDING_MODEL = "hotchpotch/static-embedding-japanese"
-SUPPORTED_EXTENSIONS = {".txt", ".md", ".py", ".ts", ".js", ".json", ".csv", ".log"}
+SUPPORTED_EXTENSIONS = {".txt", ".md", ".py", ".ts", ".js", ".json", ".yaml", ".csv", ".log"}
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
@@ -28,7 +28,7 @@ class SimpleRAG:
         self._create_tables()
 
     def _create_tables(self):
-        """データベースのテーブルを作成"""
+        """Creates the database tables."""
         cursor = self.conn.cursor()
 
         # 文書テーブル
@@ -51,19 +51,19 @@ class SimpleRAG:
         self.conn.commit()
 
     def add_document(self, text: str, doc_id):
-        """テキストを埋め込みベクトルに変換して保存"""
+        """Converts text to an embedding vector and saves it."""
         cursor = self.conn.cursor()
 
-        # 文書を保存
+        # Save the document
         cursor.execute(
             'INSERT OR REPLACE INTO documents (id, content) VALUES (?, ?)',
             (doc_id, text)
         )
 
-        # 埋め込みベクトルを生成
+        # Generate embedding vector
         embedding = self.embedding_model.encode([text])[0].tolist()
 
-        # ベクトルを保存
+        # Save the vector
         cursor.execute(
             'INSERT OR REPLACE INTO document_embeddings (id, embedding) VALUES (?, ?)',
             (doc_id, json.dumps(embedding))
@@ -71,60 +71,66 @@ class SimpleRAG:
 
         self.conn.commit()
 
-    def load_documents_from_directory(self, directory_path: str):
-        """ディレクトリから再帰的に文書を読み込み"""
-        supported_extensions = SUPPORTED_EXTENSIONS
-        doc_count = 0
+    def _read_file_content(self, file_path: str, file_ext: str) -> str:
+        """Reads content based on file extension."""
+        if file_ext == '.json':
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return json.dumps(data, ensure_ascii=False, indent=2)
+        else:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return f.read()
 
-        for root, dirs, files in os.walk(directory_path):
+    def _chunk_content(self, content: str, file_ext: str) -> list[str]:
+        """Splits content into chunks based on file extension."""
+        # Do not chunk code or JSON
+        if file_ext in {'.py', '.json', '.yaml', '.log', '.ts', '.js'}:
+            return [content]
+
+        # Split text by paragraphs, excluding short ones
+        paragraphs = [p.strip() for p in content.split('\n\n') if p.strip()]
+        return [p for p in paragraphs if len(p) > 50]
+
+    def load_documents_from_directory(self, directory_path: str) -> int:
+        """Recursively loads documents from a directory and adds them to the DB."""
+        doc_count = 0
+        for root, _, files in os.walk(directory_path):
             for file in files:
                 file_path = os.path.join(root, file)
                 file_ext = os.path.splitext(file)[1].lower()
 
-                # サポートされている拡張子のみ処理
-                if file_ext in supported_extensions:
-                    try:
-                        logger.info(f"読み込み中: {file_path}")
+                if file_ext not in SUPPORTED_EXTENSIONS:
+                    continue
 
-                        if file_ext == '.json':
-                            # JSONファイルの場合
-                            with open(file_path, 'r', encoding='utf-8') as f:
-                                data = json.load(f)
-                                content = json.dumps(data, ensure_ascii=False, indent=2)
-                        else:
-                            # テキストファイルの場合
-                            with open(file_path, 'r', encoding='utf-8') as f:
-                                content = f.read()
+                try:
+                    logger.info(f"Loading: {file_path}")
+                    content = self._read_file_content(file_path, file_ext)
+                    chunks = self._chunk_content(content, file_ext)
 
-                        # 相対パスを取得してIDに使用
-                        relative_path = os.path.relpath(file_path, directory_path)
-                        relative_path = relative_path.replace('\\', '/')  # Windows対応
+                    relative_path = os.path.relpath(file_path, directory_path).replace('\\', '/')
 
-                        if file_ext in {'.py', '.json', '.log'}:
-                            # コードやログファイルはそのまま1つの文書として追加
-                            self.add_document(content, f"{relative_path}")
-                            doc_count += 1
-                        else:
-                            # テキストファイルは段落で分割
-                            paragraphs = [p.strip() for p in content.split('\n\n') if p.strip()]
-                            for i, paragraph in enumerate(paragraphs):
-                                if len(paragraph) > 50:  # 短すぎる段落は除外
-                                    self.add_document(paragraph, f"{relative_path}_para_{i}")
-                                    doc_count += 1
+                    for i, chunk in enumerate(chunks):
+                        # Only add index to ID if there are multiple chunks
+                        doc_id = f"{relative_path}"
+                        if len(chunks) > 1:
+                            doc_id += f"_para_{i}"
 
-                    except Exception as e:
-                        logger.info(f"ファイル読み込みエラー {file_path}: {e}")
+                        self.add_document(chunk, doc_id)
+                        doc_count += 1
+
+                except Exception as e:
+                    logger.error(f"File processing error {file_path}: {e}")
 
         return doc_count
 
-    def search_documents(self, query, max_results=3):
-        """クエリを埋め込みベクトルに変換して検索"""
-        # クエリの埋め込みベクトルを生成
+    def search_documents(self, query, max_results=5):
+        """Converts the query to an embedding vector and searches."""
+        # Generate query embedding vector
         query_embedding = self.embedding_model.encode([query])[0].tolist()
 
         cursor = self.conn.cursor()
 
-        # ベクトル類似度検索
+        # Vector similarity search
         cursor.execute(f'''
             SELECT
                 doc.content,
@@ -139,18 +145,18 @@ class SimpleRAG:
         return [row[0] for row in results]
 
     def get_document_count(self):
-        """データベース内の文書数を取得"""
+        """Retrieves the number of documents in the database."""
         cursor = self.conn.cursor()
         cursor.execute('SELECT COUNT(*) FROM documents')
         return cursor.fetchone()[0]
 
     def clear_database(self):
-        """データベースをクリア"""
+        """Clears the database."""
         cursor = self.conn.cursor()
         cursor.execute('DELETE FROM documents')
         cursor.execute('DELETE FROM document_embeddings')
         self.conn.commit()
 
     def close(self):
-        """データベース接続を閉じる"""
+        """Closes the database connection."""
         self.conn.close()

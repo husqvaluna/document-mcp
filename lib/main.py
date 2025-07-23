@@ -11,10 +11,10 @@ def run():
     try:
         rag.clear_database()
         if rag.get_document_count() == 0:
-            print("resourcesディレクトリから文書を読み込み中...")
+            print("Loading documents from the resources directory...")
             loaded_count = rag.load_documents_from_directory(RESOURCES_DIR)
             doc_count = rag.get_document_count()
-            print(f"文書を読み込みました。読み込み件数: {loaded_count}, 総文書数: {doc_count}")
+            print(f"Documents loaded. Loaded count: {loaded_count}, Total documents: {doc_count}")
 
     finally:
         rag.close()

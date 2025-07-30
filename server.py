@@ -1,22 +1,26 @@
-import logging
 from fastmcp import FastMCP
 from lib.simpleRAG import SimpleRAG
 
 DATABASE_PATH = "./storage/output.sqlite3"
-SERVER_NAME = "SymbolDocumentMCPServer"
+SERVER_NAME = "DocumentMCPServer"
 
 rag = SimpleRAG(database_path=DATABASE_PATH)
 mcp = FastMCP(name=SERVER_NAME)
 
-@mcp.tool()
+@mcp.tool(
+    name='search_document',
+    description='Search document.',
+)
 def search(keyword: str):
-    """
-    Search document.
-    """
+    relevant_docs = rag.search_documents(keyword)
+    context = "\n---\n".join(relevant_docs)
+    prompt = f"""# Query
+{keyword}
 
-    results = rag.search_documents(keyword)
-
-    return results
+# References
+{context}
+"""
+    return prompt
 
 if __name__ == "__main__":
     mcp.run()

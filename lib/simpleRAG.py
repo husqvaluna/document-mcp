@@ -2,11 +2,10 @@ import json
 import logging
 import os
 import sqlite3
-
-from sentence_transformers import SentenceTransformer
 import sqlite_vec
 
-# EMBEDDING_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
+from sentence_transformers import SentenceTransformer
+
 EMBEDDING_MODEL = "hotchpotch/static-embedding-japanese"
 SUPPORTED_EXTENSIONS = {".txt", ".md", ".py", ".ts", ".js", ".json", ".yaml", ".csv", ".log"}
 

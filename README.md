@@ -8,7 +8,7 @@ $ uv sync
 
 ## Put documentations
 
-Put documentations in `resources/`.
+Put textbase files in `resources/`.
 
 ## Build Vector Database
 
